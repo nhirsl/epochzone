@@ -11,6 +11,14 @@ Cargo.lock
 *.swo
 *~
 
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+
 # OS
 .DS_Store
 Thumbs.db
