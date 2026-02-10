@@ -99,6 +99,7 @@ impl EpochZoneService {
                     .parse()
                     .map_err(|_| format!("Invalid source timezone: {}", from_str))?;
                 let naive = NaiveDateTime::parse_from_str(dt_str, "%Y-%m-%dT%H:%M:%S")
+                    .or_else(|_| NaiveDateTime::parse_from_str(dt_str, "%Y-%m-%dT%H:%M"))
                     .map_err(|e| format!("Invalid datetime '{}': {}", dt_str, e))?;
                 let local = from_tz
                     .from_local_datetime(&naive)
