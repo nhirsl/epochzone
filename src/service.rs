@@ -1,5 +1,5 @@
-use crate::models::{TimezoneInfo, TimezoneListItem};
-use chrono::{DateTime, Utc};
+use crate::models::{ConvertRequest, ConvertResponse, ConvertTimezoneInfo, TimezoneInfo, TimezoneListItem};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::{Tz, TZ_VARIANTS};
 use chrono_tz::OffsetComponents;
 
@@ -69,6 +69,88 @@ impl EpochZoneService {
     pub fn is_valid_timezone(timezone_name: &str) -> bool {
         timezone_name.parse::<Tz>().is_ok()
     }
+
+    // Convert a time between timezones
+    pub fn convert_timezone(request: &ConvertRequest) -> Result<ConvertResponse, String> {
+        // Parse target timezone
+        let to_tz: Tz = request
+            .to
+            .parse()
+            .map_err(|_| format!("Invalid target timezone: {}", request.to))?;
+
+        // Determine the UTC instant and source timezone
+        let (utc_instant, from_tz): (DateTime<Utc>, Tz) = match (
+            request.timestamp,
+            request.datetime.as_deref(),
+            request.from.as_deref(),
+        ) {
+            (Some(_), Some(_), _) | (Some(_), _, Some(_)) => {
+                return Err(
+                    "Provide either 'timestamp' or 'datetime'+'from', not both".to_string(),
+                );
+            }
+            (Some(ts), None, None) => {
+                let utc = DateTime::from_timestamp(ts, 0)
+                    .ok_or_else(|| format!("Invalid timestamp: {}", ts))?;
+                (utc, chrono_tz::UTC)
+            }
+            (None, Some(dt_str), Some(from_str)) => {
+                let from_tz: Tz = from_str
+                    .parse()
+                    .map_err(|_| format!("Invalid source timezone: {}", from_str))?;
+                let naive = NaiveDateTime::parse_from_str(dt_str, "%Y-%m-%dT%H:%M:%S")
+                    .map_err(|e| format!("Invalid datetime '{}': {}", dt_str, e))?;
+                let local = from_tz
+                    .from_local_datetime(&naive)
+                    .single()
+                    .ok_or_else(|| {
+                        format!("Ambiguous or invalid local time '{}' in {}", dt_str, from_str)
+                    })?;
+                (local.with_timezone(&Utc), from_tz)
+            }
+            (None, None, _) => {
+                return Err("Either 'timestamp' or 'datetime'+'from' is required".to_string());
+            }
+            (None, Some(_), None) => {
+                return Err("'from' timezone is required when using 'datetime'".to_string());
+            }
+        };
+
+        let from_info = Self::build_convert_info(&utc_instant, &from_tz);
+        let to_info = Self::build_convert_info(&utc_instant, &to_tz);
+
+        Ok(ConvertResponse {
+            from: from_info,
+            to: to_info,
+        })
+    }
+
+    // Build a ConvertTimezoneInfo for a given UTC instant in a given timezone
+    fn build_convert_info(utc: &DateTime<Utc>, tz: &Tz) -> ConvertTimezoneInfo {
+        let local = utc.with_timezone(tz);
+
+        let offset_str = format!("{}", local.format("%z"));
+        let utc_offset = if offset_str.len() >= 5 {
+            let sign = &offset_str[0..1];
+            let hours = &offset_str[1..3];
+            let minutes = &offset_str[3..5];
+            format!("UTC{}{}:{}", sign, hours, minutes)
+        } else {
+            "UTC+00:00".to_string()
+        };
+
+        let abbreviation = format!("{}", local.format("%Z"));
+        let is_dst = Self::is_daylight_saving_time(tz, utc);
+
+        ConvertTimezoneInfo {
+            timezone: tz.name().to_string(),
+            datetime: local.to_rfc3339(),
+            utc_offset,
+            abbreviation,
+            is_dst,
+            timestamp: utc.timestamp(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -120,9 +202,97 @@ mod tests {
     fn test_timezone_list_format() {
         let timezones = EpochZoneService::get_all_timezones();
         let ny = timezones.iter().find(|tz| tz.name == "America/New_York");
-        
+
         assert!(ny.is_some());
         let ny = ny.unwrap();
         assert_eq!(ny.display_name, "America/New York");
+    }
+
+    #[test]
+    fn test_convert_timezone_with_timestamp() {
+        let request = ConvertRequest {
+            timestamp: Some(1707580800),
+            datetime: None,
+            from: None,
+            to: "America/New_York".to_string(),
+        };
+        let result = EpochZoneService::convert_timezone(&request);
+        assert!(result.is_ok());
+
+        let resp = result.unwrap();
+        assert_eq!(resp.from.timezone, "UTC");
+        assert_eq!(resp.to.timezone, "America/New_York");
+        assert_eq!(resp.from.timestamp, resp.to.timestamp);
+    }
+
+    #[test]
+    fn test_convert_timezone_with_datetime() {
+        let request = ConvertRequest {
+            timestamp: None,
+            datetime: Some("2025-02-10T15:30:00".to_string()),
+            from: Some("Europe/Belgrade".to_string()),
+            to: "America/New_York".to_string(),
+        };
+        let result = EpochZoneService::convert_timezone(&request);
+        assert!(result.is_ok());
+
+        let resp = result.unwrap();
+        assert_eq!(resp.from.timezone, "Europe/Belgrade");
+        assert_eq!(resp.to.timezone, "America/New_York");
+        assert_eq!(resp.from.timestamp, resp.to.timestamp);
+        // Belgrade is CET (UTC+1) in February, NY is EST (UTC-5), difference is 6 hours
+        assert!(resp.to.datetime.contains("09:30:00"));
+    }
+
+    #[test]
+    fn test_convert_timezone_invalid_target() {
+        let request = ConvertRequest {
+            timestamp: Some(1707580800),
+            datetime: None,
+            from: None,
+            to: "Invalid/Zone".to_string(),
+        };
+        let result = EpochZoneService::convert_timezone(&request);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid target timezone"));
+    }
+
+    #[test]
+    fn test_convert_timezone_missing_fields() {
+        let request = ConvertRequest {
+            timestamp: None,
+            datetime: None,
+            from: None,
+            to: "UTC".to_string(),
+        };
+        let result = EpochZoneService::convert_timezone(&request);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("required"));
+    }
+
+    #[test]
+    fn test_convert_timezone_both_timestamp_and_datetime() {
+        let request = ConvertRequest {
+            timestamp: Some(1707580800),
+            datetime: Some("2025-02-10T15:30:00".to_string()),
+            from: Some("UTC".to_string()),
+            to: "America/New_York".to_string(),
+        };
+        let result = EpochZoneService::convert_timezone(&request);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not both"));
+    }
+
+    #[test]
+    fn test_convert_timezone_datetime_without_from() {
+        let request = ConvertRequest {
+            timestamp: None,
+            datetime: Some("2025-02-10T15:30:00".to_string()),
+            from: None,
+            to: "America/New_York".to_string(),
+        };
+        let result = EpochZoneService::convert_timezone(&request);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("'from' timezone is required"));
     }
 }

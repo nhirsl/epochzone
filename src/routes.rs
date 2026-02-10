@@ -27,6 +27,7 @@ pub fn create_router(state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/api/timezones", get(handlers::get_timezones))
         .route("/api/time/{timezone}", get(handlers::get_timezone_info))
+        .route("/api/convert", post(handlers::convert_timezone))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::require_api_key,
@@ -283,5 +284,111 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_convert_requires_key() {
+        let state = test_state().await;
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/convert")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"timestamp":1707580800,"to":"America/New_York"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_convert_with_timestamp() {
+        let state = test_state().await;
+
+        let resp = crate::auth::service::create_api_key(&state.db, "test".to_string(), None)
+            .await
+            .unwrap();
+
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/convert")
+                    .header("content-type", "application/json")
+                    .header("X-API-Key", &resp.api_key)
+                    .body(Body::from(
+                        r#"{"timestamp":1707580800,"to":"America/New_York"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_convert_with_datetime_and_from() {
+        let state = test_state().await;
+
+        let resp = crate::auth::service::create_api_key(&state.db, "test".to_string(), None)
+            .await
+            .unwrap();
+
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/convert")
+                    .header("content-type", "application/json")
+                    .header("X-API-Key", &resp.api_key)
+                    .body(Body::from(
+                        r#"{"datetime":"2025-02-10T15:30:00","from":"Europe/Belgrade","to":"America/New_York"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_convert_with_invalid_timezone() {
+        let state = test_state().await;
+
+        let resp = crate::auth::service::create_api_key(&state.db, "test".to_string(), None)
+            .await
+            .unwrap();
+
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/convert")
+                    .header("content-type", "application/json")
+                    .header("X-API-Key", &resp.api_key)
+                    .body(Body::from(
+                        r#"{"timestamp":1707580800,"to":"Invalid/Zone"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }
