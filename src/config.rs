@@ -11,7 +11,7 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn from_env() -> Self {
         let origins_str = env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
-            "http://localhost:5173,https://epochzone-ui-production.up.railway.app".to_string()
+            "http://localhost:5173,https://epochzone-ui-production.up.railway.app,https://epoch.zone".to_string()
         });
 
         let cors_allowed_origins: Vec<HeaderValue> = origins_str
