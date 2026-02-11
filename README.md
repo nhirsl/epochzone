@@ -1,6 +1,6 @@
 # Epoch Zone
 
-REST API providing timezone information and conversion, built with Rust.
+REST API providing timezone information and conversion, built with Rust. Powers [epoch.zone](https://epoch.zone).
 
 ## Prerequisites
 
