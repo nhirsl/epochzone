@@ -45,9 +45,14 @@ async fn main() {
     let db = init_db(&config.database_url).await;
     tracing::info!("Database initialized at: {}", config.database_url);
 
+    // Initialize timezone finder (offline coordinate → timezone lookup)
+    let tz_finder = Arc::new(tzf_rs::DefaultFinder::new());
+    tracing::info!("Timezone finder initialized");
+
     let state = AppState {
         db,
         config: Arc::new(config),
+        tz_finder,
     };
 
     let app = create_router(state);

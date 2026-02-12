@@ -61,6 +61,13 @@ pub struct ConvertResponse {
     pub to: ConvertTimezoneInfo,
 }
 
+// Query parameters for coordinate-based timezone lookup
+#[derive(Debug, Deserialize)]
+pub struct GeolocationQuery {
+    pub lat: f64,
+    pub lng: f64,
+}
+
 // Error response structure
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ErrorResponse {

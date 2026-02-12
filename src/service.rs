@@ -94,6 +94,16 @@ impl EpochZoneService {
         utc_now.with_timezone(tz).offset().dst_offset().num_seconds() != 0
     }
 
+    // Look up timezone from geographic coordinates and return full timezone info
+    pub fn get_timezone_by_coordinates(
+        finder: &tzf_rs::DefaultFinder,
+        lat: f64,
+        lng: f64,
+    ) -> Result<TimezoneInfo, String> {
+        let tz_name = finder.get_tz_name(lng, lat);
+        Self::get_timezone_info(tz_name)
+    }
+
     // Validate if a timezone name is valid
     pub fn is_valid_timezone(timezone_name: &str) -> bool {
         timezone_name.parse::<Tz>().is_ok()
@@ -311,6 +321,40 @@ mod tests {
         let result = EpochZoneService::convert_timezone(&request);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not both"));
+    }
+
+    #[test]
+    fn test_get_timezone_by_coordinates_tokyo() {
+        let finder = tzf_rs::DefaultFinder::new();
+        let result = EpochZoneService::get_timezone_by_coordinates(&finder, 35.6762, 139.6503);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().timezone, "Asia/Tokyo");
+    }
+
+    #[test]
+    fn test_get_timezone_by_coordinates_new_york() {
+        let finder = tzf_rs::DefaultFinder::new();
+        let result = EpochZoneService::get_timezone_by_coordinates(&finder, 40.7128, -74.0060);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().timezone, "America/New_York");
+    }
+
+    #[test]
+    fn test_get_timezone_by_coordinates_london() {
+        let finder = tzf_rs::DefaultFinder::new();
+        let result = EpochZoneService::get_timezone_by_coordinates(&finder, 51.5074, -0.1278);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().timezone, "Europe/London");
+    }
+
+    #[test]
+    fn test_get_timezone_by_coordinates_ocean() {
+        let finder = tzf_rs::DefaultFinder::new();
+        // Middle of the Pacific Ocean
+        let result = EpochZoneService::get_timezone_by_coordinates(&finder, 0.0, -160.0);
+        // tzf-rs returns a timezone even for ocean points (nearest land timezone)
+        // so we just verify it doesn't error
+        assert!(result.is_ok());
     }
 
     #[test]

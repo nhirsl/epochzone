@@ -15,14 +15,15 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use axum::{
-    extract::Path,
+    extract::{Path, Query, State, rejection::QueryRejection},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
 use crate::{
-    models::{ConvertRequest, ConvertResponse, ErrorResponse, TimezoneInfo, TimezoneListItem},
+    models::{ConvertRequest, ConvertResponse, ErrorResponse, GeolocationQuery, TimezoneInfo, TimezoneListItem},
     service::EpochZoneService,
+    AppState,
 };
 
 // Handler for getting timezone information
@@ -50,6 +51,28 @@ pub async fn convert_timezone(
     Json(payload): Json<ConvertRequest>,
 ) -> Result<Json<ConvertResponse>, (StatusCode, Json<ErrorResponse>)> {
     EpochZoneService::convert_timezone(&payload)
+        .map(Json)
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse::new(e)),
+            )
+        })
+}
+
+// Handler for getting timezone by geographic coordinates
+pub async fn get_timezone_by_coordinates(
+    State(state): State<AppState>,
+    params: Result<Query<GeolocationQuery>, QueryRejection>,
+) -> Result<Json<TimezoneInfo>, (StatusCode, Json<ErrorResponse>)> {
+    let Query(params) = params.map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse::new(e.body_text())),
+        )
+    })?;
+
+    EpochZoneService::get_timezone_by_coordinates(&state.tz_finder, params.lat, params.lng)
         .map(Json)
         .map_err(|e| {
             (

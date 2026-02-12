@@ -43,6 +43,7 @@ pub fn create_router(state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/api/timezones", get(handlers::get_timezones))
         .route("/api/time/{timezone}", get(handlers::get_timezone_info))
+        .route("/api/timezone-at", get(handlers::get_timezone_by_coordinates))
         .route("/api/convert", post(handlers::convert_timezone))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -84,6 +85,7 @@ mod tests {
         AppState {
             db,
             config: Arc::new(config),
+            tz_finder: Arc::new(tzf_rs::DefaultFinder::new()),
         }
     }
 
@@ -378,6 +380,85 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_timezone_at_requires_key() {
+        let state = test_state().await;
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/timezone-at?lat=35.6762&lng=139.6503")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_timezone_at_with_valid_key() {
+        let state = test_state().await;
+
+        let resp = crate::auth::service::create_api_key(&state.db, "test".to_string(), None)
+            .await
+            .unwrap();
+
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/timezone-at?lat=35.6762&lng=139.6503")
+                    .header("X-API-Key", &resp.api_key)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let info: crate::models::TimezoneInfo = serde_json::from_slice(&body).unwrap();
+        assert_eq!(info.timezone, "Asia/Tokyo");
+    }
+
+    #[tokio::test]
+    async fn test_timezone_at_missing_params() {
+        let state = test_state().await;
+
+        let resp = crate::auth::service::create_api_key(&state.db, "test".to_string(), None)
+            .await
+            .unwrap();
+
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/timezone-at?lat=35.6762")
+                    .header("X-API-Key", &resp.api_key)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Missing lng param should fail with 400 and return JSON error
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let err: crate::models::ErrorResponse = serde_json::from_slice(&body).unwrap();
+        assert!(err.error.contains("missing field"));
     }
 
     #[tokio::test]

@@ -31,4 +31,5 @@ pub use service::EpochZoneService;
 pub struct AppState {
     pub db: tokio_rusqlite::Connection,
     pub config: Arc<config::AppConfig>,
+    pub tz_finder: Arc<tzf_rs::DefaultFinder>,
 }

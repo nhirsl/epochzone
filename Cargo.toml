@@ -25,6 +25,7 @@ serde_json = "1.0"
 # Timezone handling
 chrono = "0.4"
 chrono-tz = "0.10"
+tzf-rs = "0.4"
 
 # Tracing and logging
 tracing = "0.1"
