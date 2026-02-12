@@ -49,7 +49,7 @@ impl EpochZoneService {
         };
 
         // Get timezone abbreviation (e.g., PST, EST)
-        let abbreviation = format!("{}", local_time.format("%Z"));
+        let abbreviation = Self::format_abbreviation(&local_time);
 
         // Determine if DST is active
         let is_dst = Self::is_daylight_saving_time(&tz, &utc_now);
@@ -74,6 +74,19 @@ impl EpochZoneService {
                 TimezoneListItem { name, display_name }
             })
             .collect()
+    }
+
+    // Return timezone abbreviation, or "N/A" if chrono only provides a numeric offset
+    fn format_abbreviation<T: chrono::TimeZone>(dt: &DateTime<T>) -> String
+    where
+        T::Offset: std::fmt::Display,
+    {
+        let abbr = format!("{}", dt.format("%Z"));
+        if abbr.starts_with('+') || abbr.starts_with('-') {
+            "N/A".to_string()
+        } else {
+            abbr
+        }
     }
 
     // Check if a timezone is currently observing daylight saving time
@@ -156,7 +169,7 @@ impl EpochZoneService {
             "UTC+00:00".to_string()
         };
 
-        let abbreviation = format!("{}", local.format("%Z"));
+        let abbreviation = Self::format_abbreviation(&local);
         let is_dst = Self::is_daylight_saving_time(tz, utc);
 
         ConvertTimezoneInfo {
